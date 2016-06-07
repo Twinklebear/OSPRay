@@ -87,20 +87,31 @@ namespace ospray {
     switch(dfb->colorBufferFormat) {
       case OSP_FB_RGBA8:
         ispc::DFB_accumulate_RGBA8(dfb->ispcEquivalent,
-            (ispc::VaryingTile *)&tile,
+            (ispc::VaryingTile*)&tile,
             (ispc::VaryingTile*)&this->final,
             (ispc::VaryingTile*)&this->accum,
-            (ispc::VaryingRGBA_I8*)&this->color,
+            &this->color,
             dfb->accumId,
             dfb->hasAccumBuffer);
+        break;
       case OSP_FB_SRGBA:
         ispc::DFB_accumulate_SRGBA(dfb->ispcEquivalent,
-            (ispc::VaryingTile *)&tile,
+            (ispc::VaryingTile*)&tile,
             (ispc::VaryingTile*)&this->final,
             (ispc::VaryingTile*)&this->accum,
-            (ispc::VaryingRGBA_I8*)&this->color,
+            &this->color,
             dfb->accumId,
             dfb->hasAccumBuffer);
+        break;
+      case OSP_FB_RGBA32F:
+        ispc::DFB_accumulate_RGBA32F(dfb->ispcEquivalent,
+            (ispc::VaryingTile*)&tile,
+            (ispc::VaryingTile*)&this->final,
+            (ispc::VaryingTile*)&this->accum,
+            &this->color,
+            dfb->accumId,
+            dfb->hasAccumBuffer);
+        break;
     }
   }
 
@@ -213,7 +224,6 @@ namespace ospray {
   {
     std::vector<mpi::async::CommLayer::Message *> delayedMessage;
 
-    // PING; PRINT(this); fflush(0);
     {
       LockGuard lock(mutex);
       DBG(printf("rank %i starting new frame\n",mpi::world.rank));
@@ -225,13 +235,9 @@ namespace ospray {
       if (pixelOp)
         pixelOp->beginFrame();
 
-      // PING;fflush(0);
-      // PRINT(myTiles.size());fflush(0);
       for (int i=0;i<myTiles.size();i++) {
-        // PRINT(myTiles[i]); fflush(0);
         myTiles[i]->newFrame();
       }
-      // PING;fflush(0);
 
       // create a local copy of delayed tiles, so we can work on them outside
       // the mutex
@@ -249,8 +255,6 @@ namespace ospray {
       // incoming WILL write into the frame buffer, composite tiles,
       // etc!
       frameIsActive = true;
-
-      // PRINT(delayedMessage.size());
     }
 
     // might actually want to move this to a thread:
@@ -344,7 +348,6 @@ namespace ospray {
 
   const void *DFB::mapDepthBuffer()
   {
-    PING; fflush(0);
     if (!localFBonMaster) {
       throw std::runtime_error("#osp:mpi:dfb: tried to 'ospMap()' the depth "
                                "buffer of a frame buffer that doesn't have a "
@@ -402,7 +405,6 @@ namespace ospray {
 
   void DFB::processMessage(MasterTileMessage_RGBA_I8 *msg)
   {
-    //    PING;
     for (int iy=0;iy<TILE_SIZE;iy++) {
       int iiy = iy+msg->coords.y;
       if (iiy >= numPixels.y) continue;
@@ -412,6 +414,27 @@ namespace ospray {
         if (iix >= numPixels.x) continue;
 
         ((uint32*)localFBonMaster->colorBuffer)[iix + iiy*numPixels.x]
+          = msg->color[iy][ix];
+      }
+    }
+
+    // and finally, tell the master that this tile is done
+    DFB::TileDesc *tileDesc = this->getTileDescFor(msg->coords);
+    TileData *td = (TileData*)tileDesc;
+    this->tileIsCompleted(td);
+  }
+
+  void DFB::processMessage(MasterTileMessage_RGBA_F32 *msg)
+  {
+    for (int iy=0;iy<TILE_SIZE;iy++) {
+      int iiy = iy+msg->coords.y;
+      if (iiy >= numPixels.y) continue;
+
+      for (int ix=0;ix<TILE_SIZE;ix++) {
+        int iix = ix+msg->coords.x;
+        if (iix >= numPixels.x) continue;
+
+        ((vec4f*)localFBonMaster->colorBuffer)[iix + iiy*numPixels.x]
           = msg->color[iy][ix];
       }
     }
@@ -463,6 +486,15 @@ namespace ospray {
         memcpy(mtm->color,tile->color,TILE_SIZE*TILE_SIZE*sizeof(uint32));
         comm->sendTo(this->master,mtm,sizeof(*mtm));
       } break;
+      case OSP_FB_RGBA32F: {
+        /*! if the master has RGBA32F format, we're sending him a tile of the
+          proper data */
+        MasterTileMessage_RGBA_F32 *mtm = new MasterTileMessage_RGBA_F32;
+        mtm->command = MASTER_WRITE_TILE_F32;
+        mtm->coords  = tile->begin;
+        memcpy(mtm->color,tile->color,TILE_SIZE*TILE_SIZE*sizeof(vec4f));
+        comm->sendTo(this->master,mtm,sizeof(*mtm));
+      } break;
       default:
         throw std::runtime_error("#osp:mpi:dfb: color buffer format not "
                                  "implemented for distributed frame buffer");
@@ -490,13 +522,10 @@ namespace ospray {
       if (!frameIsActive) {
         // frame is not actually active, yet - put the tile into the
         // delayed processing buffer, and return WITHOUT deleting it.
-        DBG(PING);
         delayedMessage.push_back(_msg);
         return;
       }
     }
-
-    DBG(PING);
 
     async([=]() {
       switch (_msg->command) {
@@ -506,6 +535,9 @@ namespace ospray {
       case DFB::MASTER_WRITE_TILE_I8:
         this->processMessage((DFB::MasterTileMessage_RGBA_I8*)_msg);
         break;
+      case DFB::MASTER_WRITE_TILE_F32:
+        this->processMessage((DFB::MasterTileMessage_RGBA_F32*)_msg);
+        break;
       case DFB::WORKER_WRITE_TILE:
         this->processMessage((DFB::WriteTileMessage*)_msg);
         break;
@@ -514,8 +546,6 @@ namespace ospray {
       };
       delete _msg;
     });
-
-    DBG(PING);
   }
 
   void DFB::closeCurrentFrame()
@@ -580,7 +610,7 @@ namespace ospray {
           for (int i=0;i<TILE_SIZE*TILE_SIZE;i++) td->final.b[i] = 0.f;
           for (int i=0;i<TILE_SIZE*TILE_SIZE;i++) td->final.a[i] = 0.f;
         }
-      });
+        });
 
       if (hasAccumBuffer && (fbChannelFlags & OSP_FB_ACCUM))
         accumId = -1; // we increment at the start of the frame

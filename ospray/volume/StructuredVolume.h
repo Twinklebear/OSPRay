@@ -64,9 +64,6 @@ namespace ospray {
     //! Complete volume initialization (only on first commit).
     virtual void finish() override;
 
-    //! Get the OSPDataType enum corresponding to the voxel type string.
-    OSPDataType getVoxelType() const;
-
 #ifndef OSPRAY_VOLUME_VOXELRANGE_IN_APP
     template<typename T>
     void computeVoxelRange(const T* source, const size_t &count);
@@ -75,6 +72,9 @@ namespace ospray {
     //! build the accelerator - allows child class (data distributed) to avoid
     //! building..
     virtual void buildAccelerator();
+
+    //! Get the OSPDataType enum corresponding to the voxel type string.
+    OSPDataType getVoxelType();
 
     //! Volume size in voxels per dimension.
     vec3i dimensions;

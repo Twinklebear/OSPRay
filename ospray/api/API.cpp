@@ -29,7 +29,7 @@
 #endif
 
 #if 1
-# define LOG(a) if (ospray::logLevel > 2) std::cout << "#ospray: " << a << std::endl;
+# define LOG(a) if (ospray::logLevel > 2) { std::cout << "#ospray: " << a << std::endl << std::flush; fflush(0); }
 #else
 # define LOG(a) /*ignore*/
 #endif
@@ -233,14 +233,6 @@ extern "C" void ospAddGeometry(OSPModel model, OSPGeometry geometry)
   return ospray::api::Device::current->addGeometry(model,geometry);
 }
 
-extern "C" void ospAddVolume(OSPModel model, OSPVolume volume)
-{
-  ASSERT_DEVICE();
-  Assert(model != NULL && "invalid model in ospAddVolume");
-  Assert(volume != NULL && "invalid volume in ospAddVolume");
-  return ospray::api::Device::current->addVolume(model, volume);
-}
-
 extern "C" void ospRemoveGeometry(OSPModel model, OSPGeometry geometry)
 {
   ASSERT_DEVICE();
@@ -249,11 +241,31 @@ extern "C" void ospRemoveGeometry(OSPModel model, OSPGeometry geometry)
   return ospray::api::Device::current->removeGeometry(model, geometry);
 }
 
+extern "C" void ospAddVolume(OSPModel model, OSPVolume volume)
+{
+  ASSERT_DEVICE();
+  Assert(model != NULL && "invalid model in ospAddVolume");
+  Assert(volume != NULL && "invalid volume in ospAddVolume");
+  return ospray::api::Device::current->addVolume(model, volume);
+}
+
+extern "C" void ospRemoveVolume(OSPModel model, OSPVolume volume)
+{
+  ASSERT_DEVICE();
+  Assert(model != NULL && "invalid model in ospRemoveVolume");
+  Assert(volume != NULL && "invalid volume in ospRemoveVolume");
+  return ospray::api::Device::current->removeVolume(model, volume);
+}
+
 /*! create a new data buffer, with optional init data and control flags */
 extern "C" OSPData ospNewData(size_t nitems, OSPDataType format, const void *init, const uint32_t flags)
 {
   ASSERT_DEVICE();
-  return ospray::api::Device::current->newData(nitems,format,(void*)init,flags);
+  LOG("ospSetData(...)");
+  LOG("ospSetData(...," << nitems << "," << ((int)format) << "," << ((int*)init) << "," << flags << ",...)");
+  OSPData data = ospray::api::Device::current->newData(nitems,format,(void*)init,flags);
+  LOG("DONE ospSetData(...,\"" << nitems << "," << ((int)format) << "," << ((int*)init) << "," << flags << ",...)");
+  return data;
 }
 
 /*! add a data array to another object */
@@ -347,6 +359,7 @@ extern "C" OSPGeometry ospNewGeometry(const char *type)
   OSPGeometry geometry = ospray::api::Device::current->newGeometry(type);
   if ((ospray::logLevel > 0) && (geometry == NULL))
     std::cerr << "#ospray: could not create geometry '" << type << "'" << std::endl;
+  LOG("DONE ospNewGeometry(" << type << ") >> " << (int *)geometry);
   return geometry;
 }
 
@@ -411,7 +424,8 @@ extern "C" OSPVolume ospNewVolume(const char *type)
   OSPVolume volume = ospray::api::Device::current->newVolume(type);
   if (ospray::logLevel > 0) {
     if (volume)
-      cout << "ospNewVolume: " << ((ospray::Volume*)volume)->toString() << endl;
+      cout << "ospNewVolume: " << type << endl;
+      // cout << "ospNewVolume: " << ((ospray::Volume*)volume)->toString() << endl;
     else
       std::cerr << "#ospray: could not create volume '" << type << "'" << std::endl;
   }
@@ -430,7 +444,7 @@ extern "C" OSPTransferFunction ospNewTransferFunction(const char *type)
   OSPTransferFunction transferFunction = ospray::api::Device::current->newTransferFunction(type);
   if(ospray::logLevel > 0) {
     if(transferFunction)
-      cout << "ospNewTransferFunction: " << ((ospray::TransferFunction*)transferFunction)->toString() << endl;
+      cout << "ospNewTransferFunction(" << type << ")" << endl;
     else
       std::cerr << "#ospray: could not create transfer function '" << type << "'" << std::endl;
   }
@@ -474,10 +488,9 @@ extern "C" float ospRenderFrame(OSPFrameBuffer fb,
 extern "C" void ospCommit(OSPObject object)
 {
   // assert(!rendering);
-
+  LOG("ospCommit(...)");
   ASSERT_DEVICE();
   Assert(object && "invalid object handle to commit to");
-  LOG("ospCommit(...)");
   ospray::api::Device::current->commit(object);
 }
 
@@ -647,87 +660,6 @@ extern "C" void ospSetMaterial(OSPGeometry geometry, OSPMaterial material)
   ospray::api::Device::current->setMaterial(geometry,material);
 }
 
-//! Get the handle of the named data array associated with an object.
-extern "C" int ospGetData(OSPObject object, const char *name, OSPData *value) {
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->getData(object, name, value));
-}
-
-//! Get a copy of the data in an array (the application is responsible for freeing this pointer).
-extern "C" int ospGetDataValues(OSPData object, void **pointer, size_t *count, OSPDataType *type) {
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->getDataValues(object, pointer, count, type));
-}
-
-//! Get the named scalar floating point value associated with an object.
-extern "C" int ospGetf(OSPObject object, const char *name, float *value)
-{
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->getf(object, name, value));
-}
-
-//! Get the named scalar integer associated with an object.
-extern "C" int ospGeti(OSPObject object, const char *name, int *value)
-{
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->geti(object, name, value));
-}
-
-//! Get the material associated with a geometry object.
-extern "C" int ospGetMaterial(OSPGeometry geometry, OSPMaterial *value)
-{
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->getMaterial(geometry, value));
-}
-
-//! Get the named object associated with an object.
-extern "C" int ospGetObject(OSPObject object, const char *name, OSPObject *value)
-{
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->getObject(object, name, value));
-}
-
-//! Retrieve a NULL-terminated list of the parameter names associated with an object.
-extern "C" int ospGetParameters(OSPObject object, char ***value) {
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->getParameters(object, value));
-}
-
-//! Get a pointer to a copy of the named character string associated with an object.
-extern "C" int ospGetString(OSPObject object, const char *name, char **value)
-{
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->getString(object, name, value));
-}
-
-//! Get the type of the named parameter or the given object (if 'name' is NULL).
-extern "C" int ospGetType(OSPObject object, const char *name, OSPDataType *value)
-{
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->getType(object, name, value));
-}
-
-//! Get the named 2-vector floating point value associated with an object.
-extern "C" int ospGetVec2f(OSPObject object, const char *name, osp::vec2f *value)
-{
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->getVec2f(object, name, (vec2f *)value));
-}
-
-//! Get the named 3-vector floating point value associated with an object.
-extern "C" int ospGetVec3f(OSPObject object, const char *name, osp::vec3f *value)
-{
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->getVec3f(object, name, (vec3f *)value));
-}
-
-//! Get the named 3-vector integer value associated with an object.
-extern "C" int ospGetVec3i(OSPObject object, const char *name, osp::vec3i *value)
-{
-  ASSERT_DEVICE();
-  return(ospray::api::Device::current->getVec3i(object, name, (vec3i *)value));
-}
-
 /*! \brief create a new instance geometry that instantiates another
   model.  the resulting geometry still has to be added to another
   model via ospAddGeometry */
@@ -752,7 +684,8 @@ extern "C" void ospPick(OSPPickResult *result,
   ASSERT_DEVICE();
   Assert2(renderer, "NULL renderer passed to ospPick");
   if (!result) return;
-  *result = ospray::api::Device::current->pick(renderer, (const vec2f&)screenPos);
+  *result = ospray::api::Device::current->pick(renderer,
+                                               (const vec2f&)screenPos);
 }
 
 //! \brief allows for switching the MPI scope from "per rank" to "all ranks"
@@ -794,6 +727,7 @@ extern "C" void ospSampleVolume(float **results,
     return;
   }
 
-  ospray::api::Device::current->sampleVolume(results, volume, (vec3f*)&worldCoordinates, count);
+  ospray::api::Device::current->sampleVolume(results, volume,
+                                             (vec3f*)&worldCoordinates, count);
 }
 

@@ -14,9 +14,33 @@
 // limitations under the License.                                           //
 // ======================================================================== //
 
-#include "Device.h"
+// own
+#include "Importer.h"
+// ospcommon
+#include "common/FileName.h"
 
 namespace ospray {
-  using std::cout; 
-  using std::endl;
-} // ::ospray
+  namespace vv_importer {
+
+    void importOSP(const FileName &fileName, Group *existingGroupToAddTo);
+    void importRM(const FileName &fileName, Group *existingGroupToAddTo);
+
+    Group *import(const std::string &fn, Group *existingGroupToAddTo)
+    {
+      FileName fileName = fn;
+      Group *group = existingGroupToAddTo;
+      if (!group) group = new Group;
+
+      if (fileName.ext() == "osp") {
+        importOSP(fn, group);
+      } else if (fileName.ext() == "bob") {
+        importRM(fn, group);
+      } else {
+        throw std::runtime_error("#ospray:vv: do not know how to import file of type "+fileName.ext());
+      }
+
+      return group;
+    }
+
+  }
+}
